@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <!-- REQUIRED viewport to prevent zooming issues on mobile -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CommsOne — Voice + Video + Chat (WebRTC + Firebase)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#071028;
+      --card:#0b1624;
+      --accent:#2563eb;
+      --accent-2:#1e40af;
+      --muted:#9aa9c0;
+      --glass: rgba(255,255,255,0.03);
+      color-scheme: dark;
+      --radius:12px;
+      --gap:12px;
+      --touch:48px;
+    }
+  /* Reset & base */
+  *{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto}
+  html,body{height:100%;width:100%;overflow-x:hidden}
+  body{
+      margin:0;
+      background: linear-gradient(180deg,#041226,#07102a);
+      min-height:100vh;
+      color:#e7f0fb;
+      padding:18px;
+      overflow-x:hidden; /* prevent horizontal scroll */
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+    /* App container: responsive grid */
+    .app{
+      width:100%;
+      max-width:1200px;
+      margin:0 auto;
+      box-sizing:border-box;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:var(--radius);
+      padding:14px;
+      border:1px solid rgba(255,255,255,0.03);
+      display:grid;
+      grid-template-columns: minmax(180px,240px) 1fr minmax(200px,360px); /* sidebar | main(video) | right(chat) */
+      gap:var(--gap);
+      box-shadow:0 10px 40px rgba(2,6,23,0.6);
+      align-items:start;
+    }
+
+    /* allow direct children of .app to shrink to avoid overflow */
+    .app > * { min-width: 0; }
+
+    header{
+      grid-column: 1 / -1;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:6px;
+      flex-wrap:wrap; /* allow header items to wrap on narrow screens */
+    }
+    .title{font-weight:700;font-size:18px}
+    .sub{font-size:12px;color:var(--muted)}
+    .presence{display:flex;gap:8px;align-items:center}
+    .tiny{font-size:12px;color:var(--muted)}
+
+    /* cards */
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+      padding:12px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,0.02);
+    }
+
+    /* SIDEBAR */
+    .sidebar{display:flex;flex-direction:column;gap:12px;min-height:200px}
+    .sidebar .badge{padding:8px 10px;border-radius:20px;background:var(--glass);font-size:13px}
+
+    /* MAIN / VIDEO AREA */
+    .main{display:flex;flex-direction:column;gap:12px}
+    .video-area{display:flex;flex-direction:column;gap:10px}
+    .top-row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+    /* Videos: responsive aspect ratio */
+    .videos{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  .remote-wrap{flex:1 1 60%;min-width:0}
+  .local-wrap{flex:0 0 220px;min-width:120px;display:flex;flex-direction:column;gap:8px}
+    video{background:#000;border-radius:10px;width:100%;height:auto;object-fit:cover;border:1px solid rgba(255,255,255,0.03);display:block}
+    /* maintain aspect ratio for remote main video */
+    #remoteVideo{aspect-ratio:16/9;height:auto}
+    .mini video, .mini{aspect-ratio:4/3;width:100%;height:auto;border-radius:8px}
+
+    /* controls: buttons & selects */
+    button{
+      padding:10px 12px;
+      border-radius:10px;
+      border:0;
+      background:var(--accent);
+      color:white;
+      font-weight:600;
+      cursor:pointer;
+      min-height:44px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .muted{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.03)}
+    .danger{background:#ef4444}
+    select,input[type="text"]{
+      padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit;font-size:15px;
+      min-height:44px;
+    }
+
+    /* LOG box */
+    .log{font-family:monospace;font-size:13px;padding:8px;background:rgba(0,0,0,0.12);border-radius:8px;height:160px;overflow:auto}
+
+    /* RIGHT / CHAT */
+    .chat-area{display:flex;flex-direction:column;gap:10px;height:100%}
+  .messages{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px;border-radius:8px;background:rgba(0,0,0,0.08);min-height:220px;max-height:60vh;min-width:0}
+    .msg{max-width:86%;padding:10px;border-radius:10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.02);word-break:break-word}
+    .msg.me{margin-left:auto;background:linear-gradient(90deg,#10366c,#1655d6);color:white}
+    .meta{font-size:11px;color:var(--muted);margin-top:6px}
+
+    .compose{display:flex;gap:8px;align-items:center}
+    .compose input{flex:1}
+    .compose button{min-width:90px}
+
+    /* small helper row */
+    .row-between{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+
+    footer{grid-column:1 / -1;text-align:right;font-size:12px;color:var(--muted);margin-top:4px}
+
+    /* RESPONSIVE: Tablet & Mobile breakpoints */
+    @media (max-width:1000px){
+      .app{grid-template-columns: 1fr minmax(200px,320px); /* collapse sidebar left, main+chat stacked or side */ }
+      .sidebar{order:1}
+      .main{order:2}
+      .right{order:3}
+      .remote-wrap{flex-basis:100%;min-width:0}
+      .local-wrap{flex-basis:160px}
+      .messages{max-height:40vh}
+    }
+
+    @media (max-width:768px){
+      .app{grid-template-columns:1fr; padding:12px}
+      header{gap:6px}
+      .app > *{width:100%}
+      .videos{flex-direction:column}
+      .local-wrap{flex-direction:row;align-items:center;gap:8px}
+      .local-wrap video{width:120px;aspect-ratio:4/3}
+      .log{height:120px}
+      .messages{max-height:50vh}
+    }
+
+    /* MOBILE: single-column, chat compose fixed at bottom inside card */
+    @media (max-width:480px){
+      body{padding:10px}
+      .app{padding:10px;gap:10px}
+      .title{font-size:16px}
+      .sub{font-size:11px}
+      button{padding:12px 14px; min-height:48px; border-radius:12px}
+      .compose{
+        position:sticky;
+        bottom:0;
+        background:linear-gradient(180deg, rgba(10,16,28,0.6), rgba(10,16,28,0.8));
+        padding:10px;
+        border-top-left-radius:10px;
+        border-top-right-radius:10px;
+        z-index:20;
+      }
+      .messages{padding-bottom:86px; /* give space for fixed compose */ max-height:60vh;min-width:0}
+      .mini video{height:auto}
+      #remoteVideo{aspect-ratio:16/9;width:100%}
+      .local-wrap{order:2;display:flex;justify-content:space-between;align-items:center}
+      .controls{flex-wrap:wrap}
+      .card{padding:10px}
+    }
+
+    /* Accessibility focus */
+    button:focus, input:focus, select:focus { outline:2px solid rgba(37,99,235,0.25); outline-offset:2px; }
+
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="CommsOne">
+    <header>
+      <div>
+        <div class="title">CommsOne — Voice · Video · Chat</div>
+        <div class="sub">WebRTC peer-to-peer calls with Firebase signaling & realtime chat</div>
+      </div>
+      <div class="presence">
+        <div class="tiny">You: <strong id="meLabel">—</strong></div>
+        <div class="badge" id="presenceBadge">Offline</div>
+      </div>
+    </header>
+
+    <!-- SIDEBAR (left) -->
+    <aside class="card sidebar">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="roomInput" type="text" placeholder="room-abc123" style="flex:1;min-width:120px"/>
+          <button id="createRoomBtn" class="btn-ghost">Create</button>
+          <button id="joinRoomBtn" class="btn-ghost">Join</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="leaveRoomBtn" class="muted" style="flex:1">Leave</button>
+          <button id="copyRoomBtn" class="btn-ghost">Copy ID</button>
+        </div>
+        <div class="tiny" id="roomLabel">Not in room</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+          <div class="tiny">Call: <span id="callState" class="badge">idle</span></div>
+          <div class="tiny">Timer: <strong id="callTimer">00:00</strong></div>
+        </div>
+        <div class="card" style="padding:10px">
+          <div class="tiny">Settings</div>
+          <div style="margin-top:8px" class="tiny">
+            Replace firebaseConfig placeholder in the script with your project's config.<br>
+            Add TURN servers to <code>rtcConfig.iceServers</code> for production.
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN (video + logs) -->
+    <main class="main">
+      <div class="card video-area">
+        <div class="top-row">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <label class="tiny">Mic:</label><select id="audioSource"></select>
+            <label class="tiny">Camera:</label><select id="videoSource"></select>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="tiny">ICE: <strong id="iceState">new</strong></div>
+            <div class="tiny">PC: <strong id="pcState">new</strong></div>
+          </div>
+        </div>
+
+        <div class="videos" style="margin-top:6px">
+          <div class="remote-wrap">
+            <video id="remoteVideo" autoplay playsinline></video>
+          </div>
+          <div class="local-wrap">
+            <div class="mini card" style="padding:6px;">
+              <video id="localVideo" autoplay muted playsinline></video>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;align-items:stretch">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button id="toggleAudioBtn" class="btn-ghost">Mute</button>
+                <button id="toggleVideoBtn" class="btn-ghost">Video Off</button>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button id="swapCamBtn" class="btn-ghost">Switch Cam</button>
+                <button id="startCallBtn" class="btn-ghost">Start Call</button>
+                <button id="hangupBtn" class="danger">Hang Up</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="tiny">Logs</div>
+          <div class="tiny">Connection: <span id="pcState-mobile" style="display:none"></span></div>
+        </div>
+        <div id="logBox" class="log"></div>
+      </div>
+    </main>
+
+    <!-- RIGHT (chat) -->
+    <aside class="card right">
+      <div class="chat-area">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>Chat</strong> <span class="tiny"> (room chat)</span></div>
+          <div class="tiny" id="typingIndicator"></div>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <div class="compose">
+          <input id="msgInput" type="text" placeholder="Write a message..." aria-label="Message input" />
+          <button id="sendBtn">Send</button>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="tiny">Tip: open this page on two devices and use same room ID.</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="tiny">Online:<span id="onlineCount">0</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <footer>Built with WebRTC · Firebase Realtime Database · No external frameworks</footer>
+  </div>
+
+<script type="module">
+/* =========================
+  CommsOne — Single file app
+  (I intentionally kept all original firebase/webrtc logic unchanged,
+   only slight DOM arrangement for layout; IDs are preserved so JS works)
+  ========================= */
+
+/* ------------------ Firebase modular imports (v9+) ------------------ */
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
+import {
+  getDatabase, ref, onValue, onChildAdded, push, set, remove, update, get, child, serverTimestamp
+} from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js';
+
+/* ------------------ REPLACE WITH YOUR FIREBASE CONFIG ------------------ */
+const firebaseConfig = {
+
+  apiKey: "AIzaSyDNjcGQqerS32qGVd9tvb3DCroYEUXZ1Jo",
+  authDomain: "voice-call-dcf2d.firebaseapp.com",
+  databaseURL: "https://voice-call-dcf2d-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "voice-call-dcf2d",
+  storageBucket: "voice-call-dcf2d.firebasestorage.app",
+  messagingSenderId: "10540634677",
+  appId: "1:10540634677:web:a07362297b860dfe9f977c"
+    };
+
+if (!firebaseConfig || !firebaseConfig.apiKey) {
+  alert('Please replace firebaseConfig placeholder in the script with your Firebase project config.');
+}
+
+/* ------------------ Init Firebase ------------------ */
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+/* ------------------ UI Elements ------------------ */
+const roomInput = document.getElementById('roomInput');
+const createRoomBtn = document.getElementById('createRoomBtn');
+const joinRoomBtn = document.getElementById('joinRoomBtn');
+const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+const roomLabel = document.getElementById('roomLabel');
+const copyRoomBtn = document.getElementById('copyRoomBtn');
+
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
+const audioSource = document.getElementById('audioSource');
+const videoSource = document.getElementById('videoSource');
+
+const startCallBtn = document.getElementById('startCallBtn');
+const hangupBtn = document.getElementById('hangupBtn');
+const toggleAudioBtn = document.getElementById('toggleAudioBtn');
+const toggleVideoBtn = document.getElementById('toggleVideoBtn');
+const swapCamBtn = document.getElementById('swapCamBtn');
+
+const callState = document.getElementById('callState');
+const callTimer = document.getElementById('callTimer');
+const iceState = document.getElementById('iceState');
+const pcState = document.getElementById('pcState');
+
+const messagesEl = document.getElementById('messages');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const typingIndicator = document.getElementById('typingIndicator');
+const onlineCount = document.getElementById('onlineCount');
+
+const logBox = document.getElementById('logBox');
+const meLabel = document.getElementById('meLabel');
+const presenceBadge = document.getElementById('presenceBadge');
+
+/* ------------------ Local state ------------------ */
+let localStream = null;
+let pc = null;
+let roomId = null;
+let roomRef = null;
+let candidatesRef = null;
+let messagesRef = null;
+let presenceRef = null;
+let typingRef = null;
+let uid = 'u-' + Math.random().toString(36).slice(2,9);
+let displayName = 'User-' + uid.slice(-4);
+let isMuted = false;
+let isVideoOff = false;
+let callStart = null;
+let callTimerInt = null;
+meLabel.textContent = displayName;
+
+/* ------------------ RTC config (add TURN servers for prod) ------------------ */
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    // Example TURN (uncomment & replace with real TURN):
+    // { urls: 'turn:your.turn.server:3478', username: 'user', credential: 'pass' }
+  ]
+};
+
+/* ------------------ Helpers ------------------ */
+function log(...args){
+  const t = new Date().toLocaleTimeString();
+  logBox.textContent += `[${t}] ` + args.join(' ') + '\n';
+  logBox.scrollTop = logBox.scrollHeight;
+}
+function setText(el, txt){ if(el) el.textContent = txt; }
+function formatTime(ms){
+  const s = Math.floor(ms/1000);
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+
+/* ------------------ Device enumeration ------------------ */
+async function enumerateMediaDevices(){
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    audioSource.innerHTML = '';
+    videoSource.innerHTML = '';
+    devices.forEach(d=>{
+      if(d.kind === 'audioinput'){
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Microphone ${audioSource.length+1}`;
+        audioSource.appendChild(opt);
+      }
+      if(d.kind === 'videoinput'){
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Camera ${videoSource.length+1}`;
+        videoSource.appendChild(opt);
+      }
+    });
+  }catch(e){ log('enumerate devices error', e); }
+}
+
+/* ------------------ Local media ------------------ */
+async function startLocalMedia({audioDeviceId, videoDeviceId, video=true} = {}) {
+  try{
+    if(localStream){
+      localStream.getTracks().forEach(t=>t.stop());
+      localStream = null;
+    }
+    const constraints = {
+      audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
+      video: video ? (videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true) : false
+    };
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    localVideo.srcObject = localStream;
+    log('Local media started');
+    await enumerateMediaDevices();
+    // if peer exists, replace tracks or add tracks
+    if(pc){
+      const senders = pc.getSenders();
+      const audioTrack = localStream.getAudioTracks()[0];
+      const videoTrack = localStream.getVideoTracks()[0];
+      const senderAudio = senders.find(s => s.track && s.track.kind === 'audio');
+      if(senderAudio && audioTrack) await senderAudio.replaceTrack(audioTrack);
+      else if(audioTrack) pc.addTrack(audioTrack, localStream);
+      const senderVideo = senders.find(s => s.track && s.track.kind === 'video');
+      if(senderVideo && videoTrack) await senderVideo.replaceTrack(videoTrack);
+      else if(videoTrack) pc.addTrack(videoTrack, localStream);
+    }
+    setText(presenceBadge, 'Online');
+    updatePresence(true);
+  }catch(e){ log('startLocalMedia error', e); alert('Allow camera/microphone permissions.'); }
+}
+
+/* ------------------ Peer connection ------------------ */
+function createPeerConnection(){
+  pc = new RTCPeerConnection(rtcConfig);
+  setText(pcState, 'new');
+  pc.onicecandidate = (e) => {
+    if(!e.candidate) return;
+    const c = e.candidate.toJSON();
+    push(candidatesRef, { from: uid, candidate: c, ts: Date.now() });
+    log('Local ICE candidate pushed');
+  };
+  pc.oniceconnectionstatechange = () => {
+    setText(iceState, pc.iceConnectionState);
+    setText(pcState, pc.connectionState || pc.signalingState);
+    log('ICE state', pc.iceConnectionState, 'PC state', pc.connectionState);
+    if(pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed'){
+      setText(callState, 'connected');
+      startCallTimer();
+    } else if(pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed'){
+      setText(callState, 'disconnected');
+      stopCallTimer();
+    }
+  };
+  pc.ontrack = (e) => {
+    log('ontrack', e.streams);
+    remoteVideo.srcObject = e.streams[0];
+  };
+  pc.ondatachannel = (evt) => {
+    log('Data channel received', evt.channel.label);
+    const ch = evt.channel;
+    ch.onmessage = (m) => log('DataChannel msg', m.data);
+  };
+  if(localStream){
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+  return pc;
+}
+
+/* ------------------ Room / Signaling helpers ------------------ */
+function getRoomRef(id){
+  return ref(db, 'rooms/' + id);
+}
+function roomPath(p){ return 'rooms/' + roomId + '/' + p; }
+
+async function createRoom(){
+  if(!roomInput.value.trim()) roomInput.value = 'room-' + Math.random().toString(36).slice(2,8);
+  roomId = roomInput.value.trim();
+  roomRef = getRoomRef(roomId);
+  candidatesRef = ref(db, roomPath('candidates'));
+  messagesRef = ref(db, roomPath('messages'));
+  presenceRef = ref(db, roomPath('presence'));
+  typingRef = ref(db, roomPath('typing'));
+  pc = createPeerConnection();
+  const dc = pc.createDataChannel('chat-channel');
+  dc.onopen = () => log('Local data channel open');
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await set(ref(db, 'rooms/' + roomId + '/signal'), {
+    offer: { type: offer.type, sdp: offer.sdp },
+    createdAt: Date.now(),
+    creator: uid,
+    creatorName: displayName
+  });
+  setText(roomLabel, 'Room: ' + roomId + ' (creator)');
+  log('Created room and wrote offer');
+  onValue(ref(db, 'rooms/' + roomId + '/signal/answer'), async (snap) => {
+    const val = snap.val();
+    if(val && val.sdp){
+      log('Received answer from remote');
+      const answerDesc = { type: val.type, sdp: val.sdp };
+      await pc.setRemoteDescription(answerDesc);
+    }
+  });
+  onChildAdded(candidatesRef, async (snap) => {
+    const data = snap.val();
+    if(!data || data.from === uid) return;
+    try{
+      await pc.addIceCandidate(data.candidate);
+      log('Added remote ICE candidate');
+    }catch(e){ log('addIceCandidate error', e); }
+  });
+  setupChatListeners();
+  updatePresence(true);
+}
+
+async function joinRoom(){
+  if(!roomInput.value.trim()){ alert('Enter room ID'); return; }
+  roomId = roomInput.value.trim();
+  roomRef = getRoomRef(roomId);
+  candidatesRef = ref(db, roomPath('candidates'));
+  messagesRef = ref(db, roomPath('messages'));
+  presenceRef = ref(db, roomPath('presence'));
+  typingRef = ref(db, roomPath('typing'));
+  const snap = await get(ref(db, 'rooms/' + roomId + '/signal'));
+  const data = snap.val();
+  if(!data || !data.offer){ alert('Room not found or has no offer'); return; }
+  pc = createPeerConnection();
+  await pc.setRemoteDescription({ type: data.offer.type, sdp: data.offer.sdp });
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  await update(ref(db, 'rooms/' + roomId + '/signal'), {
+    answer: { type: answer.type, sdp: answer.sdp, responder: uid, responderName: displayName },
+    updatedAt: Date.now()
+  });
+  setText(roomLabel, 'Room: ' + roomId + ' (joined)');
+  log('Joined room and wrote answer');
+  onChildAdded(candidatesRef, async (snap) => {
+    const data = snap.val();
+    if(!data || data.from === uid) return;
+    try{
+      await pc.addIceCandidate(data.candidate);
+      log('Added remote ICE candidate');
+    }catch(e){ log('addIceCandidate error', e); }
+  });
+  setupChatListeners();
+  updatePresence(true);
+}
+
+/* ------------------ Chat (Realtime DB) ------------------ */
+function setupChatListeners(){
+  onChildAdded(messagesRef, (snap) => {
+    const m = snap.val();
+    if(!m) return;
+    renderMessage(snap.key, m);
+    if(m.sender !== uid){
+      update(ref(db, roomPath('messages/' + snap.key + '/seen')), { [uid]: true });
+    }
+  });
+  onValue(presenceRef, (snap) => {
+    const val = snap.val() || {};
+    const count = Object.keys(val).filter(k => val[k] === true).length;
+    setText(onlineCount, count);
+  });
+  onValue(typingRef, (snap) => {
+    const val = snap.val() || {};
+    const keys = Object.keys(val).filter(k => k !== uid && val[k] === true);
+    if(keys.length) setText(typingIndicator, `${keys.length} typing...`);
+    else setText(typingIndicator, '');
+  });
+}
+
+/* ------------------ Send Message ------------------ */
+sendBtn.onclick = async () => {
+  const txt = msgInput.value.trim();
+  if(!txt || !messagesRef) return;
+  const payload = {
+    text: txt,
+    sender: uid,
+    senderName: displayName,
+    ts: Date.now()
+  };
+  await push(messagesRef, payload);
+  msgInput.value = '';
+  await set(ref(db, roomPath('typing/' + uid)), false);
+};
+
+/* typing indicator */
+let typingTimeout = null;
+msgInput.addEventListener('input', async () => {
+  if(!typingRef) return;
+  await set(ref(db, roomPath('typing/' + uid)), true);
+  if(typingTimeout) clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(async () => {
+    await set(ref(db, roomPath('typing/' + uid)), false);
+  }, 1200);
+});
+
+/* ------------------ Render message ------------------ */
+function renderMessage(key, m){
+  const div = document.createElement('div');
+  div.className = 'msg ' + (m.sender === uid ? 'me' : '');
+  div.innerHTML = `<div>${escapeHtml(m.text)}</div>
+    <div class="meta">${m.senderName || m.sender} · ${new Date(m.ts).toLocaleTimeString()}
+    ${m.seen ? (' · ✓' + Object.keys(m.seen).length) : ''}</div>`;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+/* ------------------ Presence ------------------ */
+async function updatePresence(on){
+  if(!presenceRef) return;
+  await set(ref(db, roomPath('presence/' + uid)), on ? true : false);
+  if(on){
+    window.addEventListener('beforeunload', () => {
+      set(ref(db, roomPath('presence/' + uid)), false);
+    });
+  }
+}
+
+/* ------------------ Call controls ------------------ */
+startCallBtn.onclick = async () => {
+  if(!roomId){ alert('Create or join a room first'); return; }
+  if(!pc) {
+    pc = createPeerConnection();
+  }
+  setText(callState, 'calling');
+  log('Start call invoked');
+};
+
+hangupBtn.onclick = async () => {
+  endCall();
+  try{ await remove(ref(db, 'rooms/' + roomId)); log('Room removed from DB'); }catch(e){}
+};
+
+/* mute & video toggle */
+toggleAudioBtn.onclick = () => {
+  if(!localStream) return;
+  isMuted = !isMuted;
+  localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+  toggleAudioBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+};
+toggleVideoBtn.onclick = () => {
+  if(!localStream) return;
+  isVideoOff = !isVideoOff;
+  localStream.getVideoTracks().forEach(t => t.enabled = !isVideoOff);
+  toggleVideoBtn.textContent = isVideoOff ? 'Video On' : 'Video Off';
+};
+swapCamBtn.onclick = async () => {
+  const idx = videoSource.selectedIndex;
+  const next = (idx + 1) % Math.max(1, videoSource.length);
+  if(videoSource.options[next]) videoSource.selectedIndex = next;
+  await startLocalMedia({ audioDeviceId: audioSource.value, videoDeviceId: videoSource.value, video: true });
+};
+
+/* hangup cleanup */
+function endCall(){
+  if(pc){
+    pc.getSenders().forEach(s => { if(s.track) s.track.stop && s.track.stop(); });
+    try{ pc.close(); }catch(e){}
+    pc = null;
+  }
+  if(localStream){
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+    localVideo.srcObject = null;
+  }
+  remoteVideo.srcObject = null;
+  setText(callState, 'idle');
+  stopCallTimer();
+  updatePresence(false);
+  log('Call ended');
+}
+
+/* timer */
+function startCallTimer(){
+  if(callTimerInt) return;
+  callStart = Date.now();
+  callTimerInt = setInterval(() => {
+    callTimer.textContent = formatTime(Date.now() - callStart);
+  }, 500);
+}
+function stopCallTimer(){
+  clearInterval(callTimerInt); callTimerInt = null; callTimer.textContent = '00:00';
+}
+
+/* ------------------ Utility ------------------ */
+function escapeHtml(s){
+  return (s + '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ------------------ Room buttons wiring ------------------ */
+createRoomBtn.onclick = async () => {
+  await startLocalMedia({ audioDeviceId: audioSource.value, videoDeviceId: videoSource.value, video: true });
+  await createRoom();
+};
+
+joinRoomBtn.onclick = async () => {
+  await startLocalMedia({ audioDeviceId: audioSource.value, videoDeviceId: videoSource.value, video: true });
+  await joinRoom();
+};
+
+leaveRoomBtn.onclick = async () => {
+  if(!roomId) return;
+  try{ await set(ref(db, roomPath('presence/' + uid)), false); }catch(e){}
+  endCall();
+  roomId = null;
+  roomInput.value = '';
+  setText(roomLabel, 'Not in room');
+  setText(onlineCount, '0');
+  log('Left room');
+};
+
+copyRoomBtn.onclick = async () => {
+  if(!roomId){ alert('No room'); return; }
+  await navigator.clipboard.writeText(roomId);
+  alert('Room ID copied: ' + roomId);
+};
+
+/* ------------------ Init on load ------------------ */
+(async function init(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert('Your browser does not support WebRTC getUserMedia APIs. Use Chrome/Edge/Firefox up-to-date.');
+    return;
+  }
+  await enumerateMediaDevices();
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    s.getTracks().forEach(t=>t.stop());
+    await enumerateMediaDevices();
+  } catch(e){}
+  log('App ready. Your uid: ' + uid + ' Name: ' + displayName);
+  // small UX: focus message input on mobile when visible
+  if(window.matchMedia && window.matchMedia('(max-width:480px)').matches){
+    msgInput.setAttribute('autocomplete','off');
+  }
+})();
+</script>
+</body>
+</html>
