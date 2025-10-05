@@ -5,6 +5,7 @@
   <!-- REQUIRED viewport to prevent zooming issues on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>CommsOne personal</title>
+  <link rel="manifest" href="./manifest.json">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     :root{
@@ -208,6 +209,7 @@
       <div class="presence">
         <div class="tiny">You: <strong id="meLabel">—</strong></div>
         <div class="badge" id="presenceBadge">Offline</div>
+        <button id="installBtn" class="btn-ghost" style="display:none;margin-left:8px">Install</button>
       </div>
     </header>
 
@@ -308,11 +310,7 @@
     
   </div>
 
-  <!-- Floating mobile controls -->
-  <div id="floatingControls" class="floating-controls" aria-hidden="true">
-    <button id="fltMuteBtn" class="btn-ghost">Mute</button>
-    <button id="fltHangupBtn" class="danger">Hang Up</button>
-  </div>
+  <!-- Floating mobile controls removed to avoid UI issues on small screens -->
 
 <script type="module">
 /* =========================
@@ -382,9 +380,7 @@ const onlineCount = document.getElementById('onlineCount');
 const logBox = document.getElementById('logBox');
 const meLabel = document.getElementById('meLabel');
 const presenceBadge = document.getElementById('presenceBadge');
-const floatingControls = document.getElementById('floatingControls');
-const fltMuteBtn = document.getElementById('fltMuteBtn');
-const fltHangupBtn = document.getElementById('fltHangupBtn');
+const installBtn = document.getElementById('installBtn');
 
 /* ------------------ Local state ------------------ */
 let localStream = null;
@@ -402,6 +398,12 @@ let isVideoOff = false;
 let callStart = null;
 let callTimerInt = null;
 meLabel.textContent = displayName;
+let isCreator = false;
+let reconnectInProgress = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 6;
+const messageStatusMap = {}; // id -> status
+let candidatesListenerAttached = false;
 
 /* ------------------ RTC config (add TURN servers for prod) ------------------ */
 const rtcConfig = {
@@ -508,9 +510,12 @@ function createPeerConnection(){
     if(pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed'){
       setText(callState, 'connected');
       startCallTimer();
+      reconnectInProgress = false; reconnectAttempts = 0; updateMobileControls();
     } else if(pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed'){
       setText(callState, 'disconnected');
       stopCallTimer();
+      // try reconnect
+      scheduleReconnect();
     }
   };
   pc.ontrack = (e) => {
@@ -522,8 +527,9 @@ function createPeerConnection(){
     const ch = evt.channel;
     ch.binaryType = 'arraybuffer';
     ch.onmessage = (m) => handleDataChannelMessage(m);
-    // store remote channel too
-    pc._remoteDataChannel = ch;
+    // store remote channel by label
+    if(ch.label === 'chat-channel') pc._chatChannel = ch;
+    else if(ch.label === 'file-channel') pc._remoteDataChannel = ch;
   };
   if(localStream){
     localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -583,6 +589,28 @@ function handleDataChannelMessage(ev){
   }catch(e){ log('DataChannel handle error', e); }
 }
 
+// handle chat/datachannel json messages (text/ack)
+function handleChatChannelMessage(ev){
+  try{
+    const data = (typeof ev.data === 'string') ? JSON.parse(ev.data) : null;
+    if(!data) return;
+    if(data.type === 'chat-msg'){
+      // render incoming message
+      const msg = { text: data.text, sender: data.sender, senderName: data.senderName, ts: data.ts, id: data.id };
+      // send delivered ack back
+      const ack = { type: 'delivered', id: data.id, to: data.sender };
+      const ch = pc && (pc._chatChannel || pc._dataChannel);
+      if(ch && ch.readyState === 'open') ch.send(JSON.stringify(ack));
+      // render locally
+      renderMessageDOM(msg);
+    } else if(data.type === 'delivered'){
+      updateMessageStatus(data.id, 'delivered');
+    } else if(data.type === 'seen'){
+      updateMessageStatus(data.id, 'seen');
+    }
+  }catch(e){ log('chat channel handle error', e); }
+}
+
 /* ------------------ Image render helpers ------------------ */
 function renderImageMessage(blobOrUrl, cls){
   const div = document.createElement('div');
@@ -591,6 +619,17 @@ function renderImageMessage(blobOrUrl, cls){
   div.innerHTML = `<div><img src="${url}" style="max-width:220px;border-radius:8px;display:block"/></div><div class="meta">Image · ${new Date().toLocaleTimeString()}</div>`;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function generateId(){ return 'm-' + Math.random().toString(36).slice(2,10); }
+
+function updateMessageStatus(id, status){
+  messageStatusMap[id] = status;
+  const el = document.querySelector(`[data-msgid="${id}"] .msg-status`);
+  if(!el) return;
+  if(status === 'sent') el.textContent = '✓';
+  else if(status === 'delivered') el.textContent = '✓✓';
+  else if(status === 'seen') el.textContent = '👁️';
 }
 
 /* ------------------ Share screen handling ------------------ */
@@ -643,8 +682,9 @@ async function createRoom(){
   presenceRef = ref(db, roomPath('presence'));
   typingRef = ref(db, roomPath('typing'));
   pc = createPeerConnection();
+  isCreator = true;
   const dc = pc.createDataChannel('chat-channel');
-  dc.onopen = () => log('Local data channel open');
+  dc.onopen = () => { log('Local data channel open'); pc._chatChannel = dc; dc.onmessage = (m)=> handleChatChannelMessage(m); };
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   await set(ref(db, 'rooms/' + roomId + '/signal'), {
@@ -687,6 +727,7 @@ async function joinRoom(){
   const data = snap.val();
   if(!data || !data.offer){ alert('Room not found or has no offer'); return; }
   pc = createPeerConnection();
+  isCreator = false;
   await pc.setRemoteDescription({ type: data.offer.type, sdp: data.offer.sdp });
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
@@ -708,14 +749,96 @@ async function joinRoom(){
   updatePresence(true);
 }
 
+function attachCandidateListener(){
+  if(!candidatesRef || candidatesListenerAttached) return;
+  onChildAdded(candidatesRef, async (snap) => {
+    const data = snap.val();
+    if(!data || data.from === uid) return;
+    try{
+      await pc.addIceCandidate(data.candidate);
+      log('Added remote ICE candidate');
+    }catch(e){ log('addIceCandidate error', e); }
+  });
+  candidatesListenerAttached = true;
+}
+
+function scheduleReconnect(){
+  if(reconnectInProgress || !roomId) return;
+  reconnectInProgress = true;
+  reconnectAttempts = 0;
+  setText(callState, 'reconnecting...');
+  attemptReconnect();
+}
+
+async function attemptReconnect(){
+  if(reconnectAttempts >= MAX_RECONNECT_ATTEMPTS){
+    log('Max reconnect attempts reached');
+    reconnectInProgress = false; setText(callState,'disconnected'); return;
+  }
+  reconnectAttempts++;
+  log('Reconnect attempt', reconnectAttempts);
+  try{
+    // create new pc and attach local media
+    if(pc){ try{ pc.close(); }catch(e){} }
+    pc = createPeerConnection();
+    // For the caller/creator role, proactively recreate the chat datachannel so peers can exchange acks/files
+    if(isCreator){
+      try{
+        const dc = pc.createDataChannel && pc.createDataChannel('chat-channel');
+        if(dc){
+          dc.onopen = () => { log('Reconnect: local chat datachannel open'); pc._chatChannel = dc; dc.onmessage = (m) => handleChatChannelMessage(m); };
+          dc.onmessage = (m) => handleChatChannelMessage(m);
+        }
+      }catch(e){ log('recreate chat channel failed', e); }
+    }
+    attachCandidateListener();
+    if(isCreator){
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await update(ref(db, 'rooms/' + roomId + '/signal'), { offer: { type: offer.type, sdp: offer.sdp }, updatedAt: Date.now() });
+      // wait for answer
+      onValue(ref(db, 'rooms/' + roomId + '/signal/answer'), async (snap) => {
+        const val = snap.val();
+        if(val && val.sdp){ log('Reconnect: got answer'); await pc.setRemoteDescription({ type: val.type, sdp: val.sdp }); }
+      });
+    } else {
+      // joiner: fetch offer and answer
+      const snap = await get(ref(db, 'rooms/' + roomId + '/signal'));
+      const data = snap.val();
+      if(data && data.offer){
+        await pc.setRemoteDescription({ type: data.offer.type, sdp: data.offer.sdp });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await update(ref(db, 'rooms/' + roomId + '/signal'), { answer: { type: answer.type, sdp: answer.sdp, responder: uid, responderName: displayName }, updatedAt: Date.now() });
+      }
+    }
+    // success: clear reconnect flag
+    reconnectInProgress = false;
+    reconnectAttempts = 0;
+    setText(callState, 'reconnected');
+  }catch(e){ log('Reconnect attempt failed', e); setTimeout(attemptReconnect, 2000 * reconnectAttempts); }
+}
+
 /* ------------------ Chat (Realtime DB) ------------------ */
 function setupChatListeners(){
   onChildAdded(messagesRef, (snap) => {
     const m = snap.val();
     if(!m) return;
-    renderMessage(snap.key, m);
-    if(m.sender !== uid){
-      update(ref(db, roomPath('messages/' + snap.key + '/seen')), { [uid]: true });
+    // normalize message object (some older messages may not have an id)
+    const msg = Object.assign({ id: m.id || snap.key }, m);
+    // render using the DOM-aware renderer so status UI is available
+    renderMessageDOM(msg);
+    // if this message is from the remote peer, mark seen in DB (fallback) and
+    // send a P2P "delivered" ack over the chat datachannel when possible
+    if(msg.sender !== uid){
+      // DB: mark that this client has seen/delivered the message
+      try{ update(ref(db, roomPath('messages/' + snap.key + '/seen')), { [uid]: true }); }catch(e){}
+      // send delivered ack via datachannel so sender can update status immediately
+      const ch = pc && (pc._chatChannel || pc._dataChannel);
+      if(ch && ch.readyState === 'open'){
+        try{ ch.send(JSON.stringify({ type: 'delivered', id: msg.id, to: msg.sender })); }
+        catch(e){ log('failed to send delivered ack via datachannel', e); }
+      }
     }
   });
   onValue(presenceRef, (snap) => {
@@ -735,13 +858,20 @@ function setupChatListeners(){
 sendBtn.onclick = async () => {
   const txt = msgInput.value.trim();
   if(!txt || !messagesRef) return;
-  const payload = {
-    text: txt,
-    sender: uid,
-    senderName: displayName,
-    ts: Date.now()
-  };
-  await push(messagesRef, payload);
+  const id = generateId();
+  const payload = { id, text: txt, sender: uid, senderName: displayName, ts: Date.now() };
+  // try send via datachannel
+  const ch = pc && (pc._chatChannel || pc._dataChannel);
+  if(ch && ch.readyState === 'open'){
+    try{ ch.send(JSON.stringify({ type: 'chat-msg', ...payload })); updateMessageStatus(id,'sent'); }
+    catch(e){ log('chat send error', e); }
+  } else {
+    // mark as sent locally (will be delivered via DB fallback)
+    updateMessageStatus(id,'sent');
+  }
+  // push to DB for history/reliability
+  await push(messagesRef, { text: txt, sender: uid, senderName: displayName, ts: payload.ts, id });
+  renderMessageDOM(payload);
   msgInput.value = '';
   await set(ref(db, roomPath('typing/' + uid)), false);
 };
@@ -772,6 +902,106 @@ function renderMessage(key, m){
   }
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderMessageDOM(m){
+  // m: { id, text, sender, senderName, ts, img? }
+  const id = m.id || generateId();
+  const div = document.createElement('div');
+  div.setAttribute('data-msgid', id);
+  div.className = 'msg ' + (m.sender === uid ? 'me' : '');
+  if(m.img){
+    div.innerHTML = `<div><img src="${m.img}" style="max-width:220px;border-radius:8px;display:block"/></div><div class="meta">${m.senderName || m.sender} · ${new Date(m.ts).toLocaleTimeString()} <span class="msg-status">` + (messageStatusMap[id]||'') + `</span></div>`;
+  } else {
+    div.innerHTML = `<div>${escapeHtml(m.text)}</div><div class="meta">${m.senderName || m.sender} · ${new Date(m.ts).toLocaleTimeString()} <span class="msg-status">` + (messageStatusMap[id]||'') + `</span></div>`;
+  }
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  // if this is a remote message, attach a seen observer so we send a P2P "seen" ack
+  if(m.sender && m.sender !== uid){
+    attachSeenObserver(div, id, m.sender);
+  }
+  return id;
+}
+
+/* ------------------ Seen / Read receipts (P2P first, DB fallback) ------------------ */
+const _seenSent = new Set();
+let _seenObserver = null;
+
+function attachSeenObserver(el, id, sender){
+  if(!('IntersectionObserver' in window)) return; // not supported
+  if(_seenSent.has(id)) return;
+  if(!_seenObserver){
+    _seenObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if(entry.isIntersecting){
+          const target = entry.target;
+          const msgId = target.getAttribute('data-msgid');
+          const to = target.getAttribute('data-sender');
+          if(msgId && !_seenSent.has(msgId)){
+            sendSeenAck(msgId, to);
+            _seenSent.add(msgId);
+            _seenObserver.unobserve(target);
+          }
+        }
+      });
+    }, { threshold: 0.6 });
+  }
+  // tag element so observer can pick up sender if needed
+  el.setAttribute('data-msgid', id);
+  if(sender) el.setAttribute('data-sender', sender);
+  _seenObserver.observe(el);
+}
+
+// scroll-to-bottom handler: when user scrolls to bottom, mark remaining remote messages as seen
+messagesEl && messagesEl.addEventListener('scroll', async () => {
+  try{
+    const nearBottom = (messagesEl.scrollTop + messagesEl.clientHeight) >= (messagesEl.scrollHeight - 40);
+    if(!nearBottom) return;
+    // find any message elements for remote peers that haven't been seen-sent
+    const remoteMsgs = Array.from(messagesEl.querySelectorAll('.msg')).filter(d => {
+      const id = d.getAttribute('data-msgid');
+      const sender = d.getAttribute('data-sender');
+      return id && sender && sender !== uid && !_seenSent.has(id);
+    });
+    for(const el of remoteMsgs){
+      const id = el.getAttribute('data-msgid');
+      const to = el.getAttribute('data-sender');
+      if(id){ sendSeenAck(id, to); _seenSent.add(id); }
+    }
+  }catch(e){ /* ignore */ }
+});
+
+async function findMessageKeyById(id){
+  if(!messagesRef) return null;
+  try{
+    const snap = await get(messagesRef);
+    if(!snap) return null;
+    let found = null;
+    snap.forEach(child => {
+      const v = child.val();
+      if(v && (v.id === id || child.key === id)){
+        found = child.key;
+      }
+    });
+    return found;
+  }catch(e){ return null; }
+}
+
+async function sendSeenAck(id, to){
+  if(!id || !to) return;
+  // attempt send via datachannel first
+  const ch = pc && (pc._chatChannel || pc._dataChannel);
+  if(ch && ch.readyState === 'open'){
+    try{ ch.send(JSON.stringify({ type: 'seen', id, to })); }
+    catch(e){ log('seen send failed', e); }
+  } else {
+    // fallback: write to DB seen flag (find message key by id)
+    try{
+      const key = await findMessageKeyById(id);
+      if(key){ await update(ref(db, roomPath('messages/' + key + '/seen')), { [uid]: true }); }
+    }catch(e){ /* ignore */ }
+  }
 }
 
 /* ------------------ Presence ------------------ */
@@ -900,33 +1130,8 @@ imageInput && imageInput.addEventListener('change', async (e) => {
 });
 
 // Mobile floating controls logic
-function updateMobileControls(){
-  // show floating controls on small screens when a call is active
-  const small = window.matchMedia && window.matchMedia('(max-width:768px)').matches;
-  const inCall = pc && (pc.iceConnectionState === 'connected' || callTimerInt);
-  if(small && inCall){
-    floatingControls.style.display = 'flex';
-    floatingControls.setAttribute('aria-hidden','false');
-  } else {
-    floatingControls.style.display = 'none';
-    floatingControls.setAttribute('aria-hidden','true');
-  }
-}
-
-// floating control buttons
-fltMuteBtn && fltMuteBtn.addEventListener('click', () => {
-  if(!localStream) return;
-  isMuted = !isMuted;
-  localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
-  fltMuteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
-  toggleAudioBtn.textContent = isMuted ? 'Unmute' : 'Mute';
-});
-fltHangupBtn && fltHangupBtn.addEventListener('click', async () => {
-  await hangupBtn.onclick();
-});
-
+function updateMobileControls(){ /* no floating controls */ }
 window.addEventListener('resize', updateMobileControls);
-// also update once at load
 setTimeout(updateMobileControls, 500);
 
 leaveRoomBtn.onclick = async () => {
@@ -963,6 +1168,28 @@ copyRoomBtn.onclick = async () => {
   if(window.matchMedia && window.matchMedia('(max-width:480px)').matches){
     msgInput.setAttribute('autocomplete','off');
   }
+  // register service worker for PWA support
+  if('serviceWorker' in navigator){
+    try{
+      await navigator.serviceWorker.register('./service-worker.js');
+      log('Service worker registered');
+    }catch(e){ log('Service worker registration failed', e); }
+  }
+  // beforeinstallprompt handling for install button
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    if(installBtn) installBtn.style.display = 'inline-flex';
+  });
+  installBtn && installBtn.addEventListener('click', async () => {
+    if(!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+    log('PWA install choice', choice.outcome);
+    installBtn.style.display = 'none';
+    deferredPrompt = null;
+  });
 })();
 </script>
 </body>
