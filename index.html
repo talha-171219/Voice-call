@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Person Voice Call by talha (WebRTC )</title>
+<style>
+  :root{--bg:#0f1724;--card:#0b1220;--accent:#4f46e5;--muted:#94a3b8;color-scheme:dark}
+  *{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,-apple-system;background:linear-gradient(180deg,#071021 0%, #071729 100%);color:#e6eef8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:980px;max-width:100%;background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.04);border-radius:14px;padding:20px;display:grid;grid-template-columns:1fr 340px;gap:18px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+  h1{margin:0;font-size:18px}
+  .left{display:flex;flex-direction:column;gap:12px}
+  .panel{background:rgba(255,255,255,0.02);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.02)}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+  input[type="text"]{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit}
+  button{cursor:pointer;padding:10px 12px;border-radius:8px;border:0;background:var(--accent);color:white;font-weight:600}
+  .controls{display:flex;gap:8px;flex-wrap:wrap}
+  .status{font-size:13px;color:var(--muted);margin-top:6px}
+  .right{display:flex;flex-direction:column;gap:12px}
+  .box{height:200px;display:flex;align-items:center;justify-content:center;border-radius:10px;border:1px dashed rgba(255,255,255,0.03);background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+  .big{font-size:34px;font-weight:700}
+  .small{font-size:13px;color:var(--muted)}
+  .row{display:flex;gap:8px;align-items:center}
+  .muted-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:8px;border-radius:8px}
+  .danger{background:#ef4444}
+  .hidden{display:none}
+  .log{height:120px;overflow:auto;padding:8px;background:rgba(0,0,0,0.2);border-radius:8px;font-family:monospace;font-size:12px;color:#cfe9ff}
+  .tiny{font-size:11px;color:var(--muted)}
+  footer{grid-column:1 / -1;text-align:right;font-size:12px;color:var(--muted);margin-top:6px}
+  @media (max-width:920px){.card{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div class="card" role="application" aria-label="PeerVoice 2-person call">
+  <div class="left">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h1>Person Voice Call by talha</h1>
+        <div class="tiny">WebRTC - No servers required (P2P)</div>
+      </div>
+      <div class="row">
+        <div id="connectionIndicator" class="small">Disconnected</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <label>Room ID</label>
+      <div style="display:flex;gap:8px">
+        <input id="roomIdInput" type="text" placeholder="Enter or create a room id (e.g. room-1234)"/>
+        <button id="createBtn">Create</button>
+        <button id="joinBtn" class="muted-btn">Join</button>
+      </div>
+      <div class="status" id="roomStatus">Not in a room</div>
+    </div>
+
+    <div class="panel" aria-live="polite">
+      <label>Local Microphone</label>
+      <div class="row" style="gap:12px">
+        <select id="audioSource"></select>
+        <button id="testMicBtn" class="muted-btn">Test Microphone</button>
+        <button id="muteBtn" class="muted-btn">Mute</button>
+      </div>
+      <div class="status" id="micStatus">Mic: inactive</div>
+    </div>
+
+    <div class="panel">
+      <label>Call Controls</label>
+      <div class="controls" style="margin-top:8px">
+        <button id="startCallBtn" class="muted-btn">Start Call</button>
+        <button id="hangupBtn" class="muted-btn danger">Hang Up</button>
+        <div style="margin-left:auto" class="small">Timer: <span id="callTimer">00:00</span></div>
+      </div>
+      <div class="status" id="callStatus">Call: idle</div>
+    </div>
+
+    <div class="panel">
+      <label>Logs</label>
+      <div id="logs" class="log" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="box">
+      <div>
+        <div class="big" id="remoteState">—</div>
+        <div class="small" id="remoteLabel">Remote Peer</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <label>Connection Info</label>
+      <div class="small">ICE Connection: <span id="iceState">new</span></div>
+      <div class="small">Peer Connection State: <span id="pcState">new</span></div>
+      <div class="small">Local Stream: <span id="localInfo">none</span></div>
+    </div>
+
+    <div class="panel">
+      <label>Audio Output</label>
+      <div class="row">
+        <select id="audioOutput"></select>
+        <button id="setOutputBtn" class="muted-btn">Set Output</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <label>Share / Info</label>
+      <div class="small">Open this page on another device. Use the Room ID to connect.</div>
+      <div style="margin-top:8px">
+        <button id="copyRoomBtn" class="muted-btn">Copy Room ID</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>Built with WebRTC · Firebase Realtime DB · STUN (Google) · No AI</footer>
+</div>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+/*
+  == IMPORTANT: Replace firebaseConfig with your project's config ==
+  Get config from Firebase Console -> Project Settings -> Add web app
+*/
+const firebaseConfig = {
+  apiKey: "AIzaSyDNjcGQqerS32qGVd9tvb3DCroYEUXZ1Jo",
+  authDomain: "voice-call-dcf2d.firebaseapp.com",
+  databaseURL: "https://voice-call-dcf2d-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "voice-call-dcf2d",
+  storageBucket: "voice-call-dcf2d.firebasestorage.app",
+  messagingSenderId: "10540634677",
+  appId: "1:10540634677:web:a07362297b860dfe9f977c"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ----------------- UI elements ----------------- */
+const roomIdInput = document.getElementById('roomIdInput');
+const createBtn = document.getElementById('createBtn');
+const joinBtn = document.getElementById('joinBtn');
+const copyRoomBtn = document.getElementById('copyRoomBtn');
+const startCallBtn = document.getElementById('startCallBtn');
+const hangupBtn = document.getElementById('hangupBtn');
+const muteBtn = document.getElementById('muteBtn');
+const testMicBtn = document.getElementById('testMicBtn');
+const audioSourceSelect = document.getElementById('audioSource');
+const audioOutputSelect = document.getElementById('audioOutput');
+const setOutputBtn = document.getElementById('setOutputBtn');
+
+const logsEl = document.getElementById('logs');
+const roomStatus = document.getElementById('roomStatus');
+const micStatus = document.getElementById('micStatus');
+const callStatus = document.getElementById('callStatus');
+const connectionIndicator = document.getElementById('connectionIndicator');
+const remoteState = document.getElementById('remoteState');
+const remoteLabel = document.getElementById('remoteLabel');
+const iceStateEl = document.getElementById('iceState');
+const pcStateEl = document.getElementById('pcState');
+const localInfo = document.getElementById('localInfo');
+const callTimerEl = document.getElementById('callTimer');
+
+/* ----------------- WebRTC variables ----------------- */
+let localStream = null;
+let pc = null;
+let roomId = null;
+let roomRef = null;
+let isMuted = false;
+let callStartTime = null;
+let callTimerInterval = null;
+let localAudioEl = new Audio(); // will hold local audio preview if needed
+localAudioEl.muted = true;
+let remoteAudioEl = new Audio();
+remoteAudioEl.autoplay = true;
+remoteAudioEl.controls = false;
+remoteAudioEl.playsInline = true;
+
+/* STUN servers; add TURN for production */
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    // Add TURN server here if you have one:
+    // { urls: 'turn:YOUR_TURN_SERVER', username: 'user', credential: 'pass' }
+  ]
+};
+
+/* ----------------- Helpers ----------------- */
+function log(...args){
+  const time = new Date().toLocaleTimeString();
+  logsEl.textContent += `[${time}] ` + args.join(' ') + '\n';
+  logsEl.scrollTop = logsEl.scrollHeight;
+}
+function setStatus(el, txt){ el.textContent = txt; }
+function updateConnectionBadge(txt, color){
+  connectionIndicator.textContent = txt;
+  connectionIndicator.style.color = color || '';
+}
+function formatTime(ms){
+  const s = Math.floor(ms/1000);
+  const mm = String(Math.floor(s/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  return `${mm}:${ss}`;
+}
+
+/* ----------------- Media device handling ----------------- */
+async function enumerateDevices(){
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    audioSourceSelect.innerHTML = '';
+    audioOutputSelect.innerHTML = '';
+    devices.forEach(d=>{
+      if(d.kind === 'audioinput'){
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Microphone ${audioSourceSelect.length+1}`;
+        audioSourceSelect.appendChild(opt);
+      }
+      if(d.kind === 'audiooutput'){
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Speaker ${audioOutputSelect.length+1}`;
+        audioOutputSelect.appendChild(opt);
+      }
+    });
+  }catch(err){ log('enumerateDevices error', err); }
+}
+
+async function startLocalAudio(deviceId){
+  try{
+    if(localStream){
+      localStream.getTracks().forEach(t=>t.stop());
+      localStream = null;
+    }
+    const constraints = { audio: deviceId ? { deviceId: { exact: deviceId } } : true };
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    micStatus.textContent = `Mic: active (${localStream.getAudioTracks().length} track)`;
+    localInfo.textContent = `active`;
+    // attach to a muted preview so user can see it works locally if needed
+    localAudioEl.srcObject = localStream;
+    // If we already have pc, replace the audio track(s)
+    if(pc){
+      const senders = pc.getSenders().filter(s => s.track && s.track.kind === 'audio');
+      if(senders.length){
+        senders.forEach((s,i)=>s.replaceTrack(localStream.getAudioTracks()[i] || null));
+      } else {
+        localStream.getAudioTracks().forEach(track=>pc.addTrack(track, localStream));
+      }
+    }
+    await enumerateDevices();
+    log('Local audio started');
+  }catch(err){
+    micStatus.textContent = 'Mic: error';
+    log('startLocalAudio error', err);
+    alert('Microphone access is required. Please allow microphone in your browser.');
+  }
+}
+
+/* ----------------- RTC setup ----------------- */
+function createPeerConnection(){
+  pc = new RTCPeerConnection(rtcConfig);
+  setStatus(pcStateEl, 'new');
+  pc.onicecandidate = event => {
+    if(!event.candidate) return;
+    const c = event.candidate.toJSON();
+    log('ICE candidate generated', c.type || '');
+    // push candidate to db
+    const candRef = roomRef.child('candidates').push();
+    candRef.set({candidate: c, timestamp: Date.now()});
+  };
+  pc.oniceconnectionstatechange = () => {
+    setStatus(iceStateEl, pc.iceConnectionState);
+    setStatus(pcStateEl, pc.connectionState || pc.signalingState);
+    log('ICE state:', pc.iceConnectionState, 'PC state:', pc.connectionState);
+    if(pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed'){
+      updateConnectionBadge('Connected', 'lightgreen');
+      remoteState.textContent = 'Connected';
+      startTimer();
+    } else if(pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed'){
+      updateConnectionBadge('Disconnected', 'salmon');
+      remoteState.textContent = 'Disconnected';
+      stopTimer();
+    }
+  };
+  pc.ontrack = (event) => {
+    log('ontrack', event.streams);
+    // attach remote audio
+    remoteAudioEl.srcObject = event.streams[0];
+    // show remote label
+    remoteLabel.textContent = 'Remote Peer';
+  };
+  // add local tracks
+  if(localStream){
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+  return pc;
+}
+
+/* ----------------- Firebase signaling helpers ----------------- */
+function getRoomRef(id){
+  return db.ref('rooms/' + id);
+}
+
+async function createRoom(){
+  roomId = roomIdInput.value.trim() || ('room-' + Math.random().toString(36).slice(2,9));
+  roomRef = getRoomRef(roomId);
+  // basic check if exists
+  const snap = await roomRef.get();
+  if(snap.exists()){
+    if(!confirm('Room already exists. Join existing?')) return;
+  }
+  // create pc and offer
+  pc = createPeerConnection();
+  setStatus(roomStatus, 'Creating room...');
+  // create offer
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  // write offer to DB
+  await roomRef.set({
+    offer: {type: offer.type, sdp: offer.sdp},
+    createdAt: Date.now()
+  });
+  // listen for answer
+  roomRef.child('answer').on('value', async snap => {
+    const val = snap.val();
+    if(val && val.sdp){
+      log('Got remote answer');
+      const remoteDesc = new RTCSessionDescription(val);
+      await pc.setRemoteDescription(remoteDesc);
+    }
+  });
+  // listen for remote ICE candidates (from joiner)
+  roomRef.child('candidates').on('child_added', async snap => {
+    const data = snap.val();
+    try{
+      if(data && data.candidate){
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        log('Added remote ICE candidate');
+      }
+    }catch(e){ log('addIceCandidate error', e); }
+  });
+
+  roomStatus.textContent = `Room created: ${roomId}`;
+  roomIdInput.value = roomId;
+  updateConnectionBadge('Waiting for peer', 'gold');
+  log('Room created with offer written to DB');
+}
+
+async function joinRoom(){
+  if(!roomIdInput.value.trim()){
+    alert('Enter a room ID to join');
+    return;
+  }
+  roomId = roomIdInput.value.trim();
+  roomRef = getRoomRef(roomId);
+  const snap = await roomRef.get();
+  if(!snap.exists()){
+    alert('Room not found — check the ID or create a room first.');
+    return;
+  }
+  // read offer
+  const data = snap.val();
+  if(!data.offer) { alert('Room has no offer'); return; }
+  pc = createPeerConnection();
+  setStatus(roomStatus, 'Joining room...');
+  // set remote offer
+  const offerDesc = new RTCSessionDescription(data.offer);
+  await pc.setRemoteDescription(offerDesc);
+  // create answer
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  // write answer
+  await roomRef.child('answer').set({type: answer.type, sdp: answer.sdp, createdAt: Date.now()});
+  // listen for remote ICE candidates (from creator)
+  roomRef.child('candidates').on('child_added', async snap => {
+    const data = snap.val();
+    try{
+      if(data && data.candidate){
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        log('Added remote ICE candidate');
+      }
+    }catch(e){ log('addIceCandidate error', e); }
+  });
+
+  roomStatus.textContent = `Joined room: ${roomId}`;
+  updateConnectionBadge('Connecting...', 'orange');
+  log('Joined room and set answer');
+}
+
+/* ----------------- Candidate watcher (both sides) ----------------- */
+/* Note: we push candidates from local onicecandidate handler. The DB uses same 'candidates' list.
+   To avoid adding own candidates twice, we rely on the fact that remote side will read them. */
+
+/* ----------------- Call controls ----------------- */
+startCallBtn.onclick = async () => {
+  if(!localStream){
+    await startLocalAudio(audioSourceSelect.value || undefined);
+  }
+  if(!roomRef){
+    alert('Create or join a room first.');
+    return;
+  }
+  // If creator created the offer earlier, connection flow will continue automatically.
+  // For joiner, ensure joinRoom was called which created/answered.
+  // We'll just ensure pc exists and local tracks present.
+  if(!pc) pc = createPeerConnection();
+  // If we are the joiner but haven't answered yet, call joinRoom
+  const snap = await roomRef.get();
+  const val = snap.val();
+  if(val && val.offer && !val.answer && confirm('No answer yet — are you the room creator? Click Cancel to join as joiner.')){
+    // do nothing; creator already created offer
+    log('Waiting as creator for remote peer to join and answer');
+  } else if(val && val.offer && !val.answer){
+    // join as joiner
+    await joinRoom();
+  }
+  callStatus.textContent = 'Call: connecting...';
+  log('Call start invoked');
+};
+
+hangupBtn.onclick = async () => {
+  log('Hang up clicked');
+  stopCall();
+  if(roomRef && roomId){
+    // cleanup DB (only remove if you're the creator or if you choose)
+    try{
+      // Optionally remove room entirely for dev convenience:
+      await roomRef.remove();
+      log('Room removed from DB');
+    }catch(e){ log('Failed to remove room', e); }
+  }
+};
+
+function stopCall(){
+  if(pc){
+    pc.getSenders().forEach(s=>{ if(s.track) s.track.stop && s.track.stop(); });
+    try{ pc.close(); }catch(e){}
+    pc = null;
+  }
+  if(localStream){
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+  if(roomRef){
+    // stop DB listeners
+    roomRef.off();
+  }
+  callStatus.textContent = 'Call: ended';
+  setStatus(iceStateEl, 'closed');
+  setStatus(pcStateEl, 'closed');
+  stopTimer();
+  updateConnectionBadge('Disconnected','salmon');
+  localInfo.textContent = 'none';
+  micStatus.textContent = 'Mic: inactive';
+  log('Call stopped and cleaned up');
+}
+
+/* ----------------- Mute / Unmute ----------------- */
+muteBtn.onclick = () => {
+  if(!localStream){ alert('No local audio'); return; }
+  isMuted = !isMuted;
+  localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+  muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+  micStatus.textContent = `Mic: ${isMuted ? 'muted' : 'active'}`;
+  log(isMuted ? 'Muted' : 'Unmuted');
+};
+
+/* ----------------- Test mic button ----------------- */
+testMicBtn.onclick = async () => {
+  await startLocalAudio(audioSourceSelect.value || undefined);
+  log('Microphone test ready — speak to verify audio input (local preview muted).');
+};
+
+/* ----------------- Timer ----------------- */
+function startTimer(){
+  if(callTimerInterval) return;
+  callStartTime = Date.now();
+  callTimerInterval = setInterval(()=>{
+    const elapsed = Date.now() - callStartTime;
+    callTimerEl.textContent = formatTime(elapsed);
+  }, 500);
+}
+function stopTimer(){
+  clearInterval(callTimerInterval);
+  callTimerInterval = null;
+  callTimerEl.textContent = '00:00';
+}
+
+/* ----------------- Audio output selection ----------------- */
+setOutputBtn.onclick = async () => {
+  const deviceId = audioOutputSelect.value;
+  if(typeof remoteAudioEl.sinkId !== 'undefined'){
+    try{
+      await remoteAudioEl.setSinkId(deviceId);
+      log('Audio output set to', audioOutputSelect.selectedOptions[0].textContent);
+    }catch(err){ log('setSinkId error', err); alert('Failed to set audio output device.'); }
+  } else {
+    alert('Your browser does not support selecting audio output device.');
+  }
+};
+
+/* ----------------- Copy room ID ----------------- */
+copyRoomBtn.onclick = async () => {
+  if(!roomId){
+    alert('No room created/joined yet.');
+    return;
+  }
+  await navigator.clipboard.writeText(roomId);
+  alert('Room ID copied: ' + roomId);
+};
+
+/* ----------------- UI wiring ----------------- */
+createBtn.onclick = async () => {
+  await startLocalAudio(audioSourceSelect.value || undefined);
+  await createRoom();
+};
+joinBtn.onclick = async () => {
+  await startLocalAudio(audioSourceSelect.value || undefined);
+  await joinRoom();
+};
+
+/* ----------------- Auto enumerate devices on load ----------------- */
+(async function init(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert('Your browser does not support WebRTC getUserMedia APIs. Please use Chrome/Edge/Firefox up-to-date.');
+    return;
+  }
+  try{
+    await enumerateDevices();
+    log('Devices enumerated');
+    // Try to get permission quietly to populate labels
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach(t=>t.stop());
+      await enumerateDevices();
+    }catch(e){ /* user may block; ignore */ }
+  }catch(e){
+    log('init error', e);
+  }
+})();
+
+/* ----------------- Window unload cleanup ----------------- */
+window.addEventListener('beforeunload', () => {
+  try{ stopCall(); }catch(e){}
+});
+
+/* ----------------- Final notes in console ----------------- */
+log('PeerVoice ready — create a room on one device and join with another device using the same Room ID.');
+</script>
+</body>
+</html>
